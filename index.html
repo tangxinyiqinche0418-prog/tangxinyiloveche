@@ -4728,12 +4728,21 @@ function togglePushNotif() {
   }
 }
 function sendPushNotif(msg) {
-  if (state.settings.pushEnabled && Notification.permission === 'granted' && document.hidden) {
-    new Notification(state.otherName, {
-      body: msg.type === 'image' ? '[图片]' : msg.content,
-      icon: state.otherAvatar || ''
+  if (!state.settings.pushEnabled) return;
+  if (Notification.permission !== 'granted') return;
+  const body = msg.type === 'image' ? '[图片]' : msg.content;
+  const icon = state.otherAvatar || '';
+  const title = state.otherName + ' 说';
+  try {
+    const n = new Notification(title, {
+      body, icon,
+      tag: 'wechat-msg',
+      renotify: true,
+      vibrate: [200, 100, 200]
     });
-  }
+    n.onclick = () => { window.focus(); showScreen('chatScreen'); n.close(); };
+    setTimeout(() => { try { n.close(); } catch(e){} }, 4000);
+  } catch(e) { console.warn('Notif:', e); }
 }
 
 // ============================================================
@@ -8064,9 +8073,27 @@ function initPWA() {
 }
 
 // ============================================================
+// 后台活动：页面隐藏/显示处理
+// ============================================================
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    // 页面重新进入前台，重新调度
+    scheduleProactive();
+    applyBoardFreqSettings();
+    updateBoardBadge();
+  }
+});
+
+// 后台保活（SW 不可用时依赖页面定时器）
+
+// ============================================================
 // BOOT
 // ============================================================
 init();
+</script>
+<script>
+// 通知权限提前请求
+window._swReg = null;
 </script>
 </body>
 </html>
