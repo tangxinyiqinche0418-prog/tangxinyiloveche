@@ -2408,6 +2408,13 @@ select.modal-input {
           <div class="toggle-knob"></div>
         </div>
       </div>
+      <div class="settings-row" onclick="testNotification()">
+        <div class="settings-row-left">
+          <div class="settings-row-icon" style="background:#E8F5E9"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#666" stroke-width="1.8" stroke-linecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#666" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <span class="settings-row-label">测试通知</span>
+        </div>
+        <span class="settings-row-value" style="color:var(--accent)">点击测试 →</span>
+      </div>
       <div class="settings-row" onclick="exportData()">
         <div class="settings-row-left">
           <div class="settings-row-icon" style="background:#EFEFEF"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8" stroke="#666" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -3769,6 +3776,7 @@ function init() {
   updateLoveLibCount();
   applyProactiveSettings();
   applyBoardFreqSettings();
+  scheduleMoments();
   // 每日签到延迟600ms弹出，更自然
   setTimeout(() => {
     if (shouldShowCheckin()) showCheckin();
@@ -5420,26 +5428,51 @@ function updateOtherStatus(status) {
 // MOMENTS (朋友圈)
 // ============================================================
 function generateMoments() {
-  if (state.moments && state.moments.length > 0) return;
-  state.moments = [];
+  if (!state.moments) state.moments = [];
   const allCards = Object.values(state.cards).flat();
   const allImgs = Object.values(state.cardImages).flat();
-  for (let i = 0; i < 3; i++) {
-    const text = allCards.length > 0 ? allCards[Math.floor(Math.random() * allCards.length)] : '今天天气真好～';
+  const defaultTexts = ['今天天气真好～','想你了','最近很忙但很充实','今天吃了好好吃的东西','晚安～','早安！新的一天开始了'];
+  // 如果是空的，先生成3条
+  const needed = state.moments.length === 0 ? 3 : 1;
+  for (let i = 0; i < needed; i++) {
+    const textPool = allCards.length > 0 ? allCards : defaultTexts;
+    const text = textPool[Math.floor(Math.random() * textPool.length)];
     const moment = {
       id: Date.now() + i,
       text,
-      img: allImgs.length > 0 && Math.random() < 0.5 ? allImgs[Math.floor(Math.random() * allImgs.length)].data : null,
-      time: `${randInt(1,12)}小时前`,
+      img: allImgs.length > 0 && Math.random() < 0.4 ? allImgs[Math.floor(Math.random() * allImgs.length)].data : null,
+      time: needed === 1 ? '刚刚' : `${randInt(1,12)}小时前`,
       comments: []
     };
     if (Math.random() < 0.4 && allCards.length > 0) {
-      const reply = allCards[Math.floor(Math.random() * allCards.length)];
-      moment.comments.push({ from: 'other', text: reply });
+      moment.comments.push({ from: 'other', text: allCards[Math.floor(Math.random() * allCards.length)] });
     }
-    state.moments.push(moment);
+    state.moments.unshift(moment); // 新朋友圈插到最前面
   }
   saveState();
+}
+
+// 定时自动发新朋友圈（每4~12小时一条）
+let _momentsTimer = null;
+function scheduleMoments() {
+  if (_momentsTimer) { clearTimeout(_momentsTimer); _momentsTimer = null; }
+  const delay = randInt(4 * 3600 * 1000, 12 * 3600 * 1000);
+  _momentsTimer = setTimeout(() => {
+    generateMoments(); // 加一条新的
+    // 如果朋友圈页面开着就刷新
+    const screen = document.getElementById('momentsScreen');
+    if (screen && screen.classList.contains('active')) renderMoments();
+    // 通知
+    if (state.settings.pushEnabled && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(`${state.otherName} 发了新朋友圈`, {
+          body: '点击查看 📸', tag: 'moments-notif'
+        });
+        setTimeout(() => { try { n.close(); } catch(e){} }, 4000);
+      } catch(e) {}
+    }
+    scheduleMoments();
+  }, delay);
 }
 function renderMoments() {
   const list = document.getElementById('momentsList');
@@ -7558,7 +7591,15 @@ function applyBoardFreqSettings() {
   const freq = state.boardFreq || 'medium';
   const radio = document.querySelector(`input[name="boardFreq"][value="${freq}"]`);
   if (radio) radio.checked = true;
-  scheduleBoardMsg();
+  // 如果留言板是空的，5秒后立即发第一条，不用等
+  if ((!state.board || state.board.length === 0) && freq !== 'off') {
+    setTimeout(() => {
+      autoSendBoardMsg();
+      scheduleBoardMsg();
+    }, 5000);
+  } else {
+    scheduleBoardMsg();
+  }
 }
 
 function updateBoardNextHint(remainMs) {
@@ -8085,6 +8126,46 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 后台保活（SW 不可用时依赖页面定时器）
+
+// ============================================================
+// 测试通知
+// ============================================================
+function testNotification() {
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') doTestNotif();
+      else showToast('❌ 请先允许通知权限');
+    });
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    showToast('❌ 通知权限被拒绝，请在浏览器设置里手动开启');
+    return;
+  }
+  doTestNotif();
+}
+
+function doTestNotif() {
+  try {
+    const n = new Notification(state.otherName + ' 说', {
+      body: '这是一条测试通知，通知功能正常 ✅',
+      tag: 'test-notif',
+      renotify: true,
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => { try { n.close(); } catch(e){} }, 5000);
+    showToast('测试通知已发送，请查看系统通知栏 🔔');
+    // 顺便开启推送
+    if (!state.settings.pushEnabled) {
+      state.settings.pushEnabled = true;
+      const sw = document.getElementById('pushSwitch');
+      if (sw) sw.classList.add('on');
+      saveState();
+    }
+  } catch(e) {
+    showToast('通知发送失败：' + e.message);
+  }
+}
 
 // ============================================================
 // BOOT
