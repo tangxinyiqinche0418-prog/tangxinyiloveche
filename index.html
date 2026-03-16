@@ -4741,6 +4741,7 @@ function sendPushNotif(msg) {
   const body = msg.type === 'image' ? '[图片]' : msg.content;
   const icon = state.otherAvatar || '';
   const title = state.otherName + ' 说';
+  if (location.protocol === 'file:') return; // 本地文件不支持
   try {
     const n = new Notification(title, {
       body, icon,
@@ -8146,6 +8147,12 @@ function testNotification() {
 }
 
 function doTestNotif() {
+  // 本地 file:// 不支持通知，需要 https 环境
+  const isLocal = location.protocol === 'file:';
+  if (isLocal) {
+    showToast('⚠️ 本地文件不支持通知，请上传到网址后再测试');
+    return;
+  }
   try {
     const n = new Notification(state.otherName + ' 说', {
       body: '这是一条测试通知，通知功能正常 ✅',
@@ -8154,8 +8161,7 @@ function doTestNotif() {
     });
     n.onclick = () => { window.focus(); n.close(); };
     setTimeout(() => { try { n.close(); } catch(e){} }, 5000);
-    showToast('测试通知已发送，请查看系统通知栏 🔔');
-    // 顺便开启推送
+    showToast('测试通知已发送，请查看通知栏 🔔');
     if (!state.settings.pushEnabled) {
       state.settings.pushEnabled = true;
       const sw = document.getElementById('pushSwitch');
@@ -8163,7 +8169,8 @@ function doTestNotif() {
       saveState();
     }
   } catch(e) {
-    showToast('通知发送失败：' + e.message);
+    // 降级提示
+    showToast('需要在 https 网址下才能收到通知');
   }
 }
 
